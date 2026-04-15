@@ -1,0 +1,56 @@
+# pysystemtrade crontab — UTC timezone (Melbourne AEDT = UTC+11, AEST = UTC+10)
+#
+# All times are UTC. Server must be set to UTC.
+# Set with: sudo timedatectl set-timezone UTC
+#
+# Daily cycle overview (Melbourne AEDT times in brackets):
+#   00:00 UTC (11:00 AEDT) — Stack handler starts, covers Asian/European/US sessions
+#   00:45 UTC (11:45 AEDT) — Capital update
+#   21:30 UTC (08:30 AEDT) — Price + FX download after US futures close
+#   22:00 UTC (09:00 AEDT) — Backtest runs
+#   22:15 UTC (09:15 AEDT) — Orders generated
+#   22:30 UTC (09:30 AEDT) — Adjusted prices updated
+#   22:45 UTC (09:45 AEDT) — Cleaners
+#   23:00 UTC (10:00 AEDT) — Backups
+#   23:15 UTC (10:15 AEDT) — Reports
+#
+# Note: during AEST (no daylight saving) subtract 1 hour from Melbourne times above.
+# Note: $MONGO_DATA must be accessible at boot; won't work if in an encrypted home folder.
+
+# ── On boot ───────────────────────────────────────────────────────────────────
+@reboot    $HOME/.profile; mongod --dbpath $MONGO_DATA
+@reboot    $SCRIPT_PATH/startup  >> $ECHO_PATH/startup.txt 2>&1
+
+# ── Stack handler (00:00 UTC / 11:00 AEDT) ───────────────────────────────────
+# Covers Asian open through US close. Internal process control stops it ~22:00 UTC.
+00 00  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_stack_handler  >> $ECHO_PATH/run_stack_handler.txt 2>&1
+
+# ── Capital update (00:45 UTC / 11:45 AEDT) ──────────────────────────────────
+# Polls IB for current account value. Runs after stack handler has connected.
+45 00  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_capital_update  >> $ECHO_PATH/run_capital_update.txt 2>&1
+
+# ── Price + FX download (21:30 UTC / 08:30 AEDT) ─────────────────────────────
+# Runs after US futures close (~21:00 UTC). Downloads daily prices and FX rates.
+30 21  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_daily_price_updates  >> $ECHO_PATH/run_daily_price_updates.txt 2>&1
+30 21  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_daily_fx_and_contract_updates  >> $ECHO_PATH/run_daily_fx_and_contract_updates.txt 2>&1
+
+# ── Backtest (22:00 UTC / 09:00 AEDT) ────────────────────────────────────────
+# Runs strategy against today's fresh prices. Calculates ideal positions.
+00 22  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_systems  >> $ECHO_PATH/run_systems.txt 2>&1
+
+# ── Order generation (22:15 UTC / 09:15 AEDT) ────────────────────────────────
+# Compares ideal vs actual positions. Creates orders if outside buffer.
+15 22  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_strategy_order_generator  >> $ECHO_PATH/run_strategy_order_generator.txt 2>&1
+
+# ── Adjusted prices update (22:30 UTC / 09:30 AEDT) ──────────────────────────
+# Rebuilds continuous back-adjusted price series from today's data.
+30 22  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_daily_update_multiple_adjusted_prices  >> $ECHO_PATH/run_daily_update_multiple_adjusted_prices.txt 2>&1
+
+# ── Cleaners (22:45 UTC / 09:45 AEDT) ────────────────────────────────────────
+45 22  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_cleaners  >> $ECHO_PATH/run_cleaners.txt 2>&1
+
+# ── Backups (23:00 UTC / 10:00 AEDT) ─────────────────────────────────────────
+00 23  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_backups  >> $ECHO_PATH/run_backups_echos.txt 2>&1
+
+# ── Reports (23:15 UTC / 10:15 AEDT) ─────────────────────────────────────────
+15 23  * * 1-5    $HOME/.profile; $SCRIPT_PATH/run_reports  >> $ECHO_PATH/run_reports.txt 2>&1
