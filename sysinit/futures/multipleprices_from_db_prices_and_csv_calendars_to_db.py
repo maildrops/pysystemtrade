@@ -62,15 +62,22 @@ def process_multiple_prices_all_instruments(
         db_individual_futures_prices.get_list_of_instrument_codes_with_merged_price_data()
     )
 
+    failed = []
     for instrument_code in instrument_list:
         print(instrument_code)
-        process_multiple_prices_single_instrument(
-            instrument_code,
-            csv_multiple_data_path=csv_multiple_data_path,
-            csv_roll_data_path=csv_roll_data_path,
-            ADD_TO_DB=ADD_TO_DB,
-            ADD_TO_CSV=ADD_TO_CSV,
-        )
+        try:
+            process_multiple_prices_single_instrument(
+                instrument_code,
+                csv_multiple_data_path=csv_multiple_data_path,
+                csv_roll_data_path=csv_roll_data_path,
+                ADD_TO_DB=ADD_TO_DB,
+                ADD_TO_CSV=ADD_TO_CSV,
+            )
+        except Exception as exc:
+            print(f"  SKIP {instrument_code}: {exc}")
+            failed.append(instrument_code)
+    if failed:
+        print(f"\nFailed instruments: {failed}")
 
 
 def process_multiple_prices_single_instrument(
