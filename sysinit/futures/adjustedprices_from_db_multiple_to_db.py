@@ -27,14 +27,21 @@ def process_adjusted_prices_all_instruments(
 ):
     db_multiple_prices, _notused, _alsonotused = _get_data_inputs(csv_adj_data_path)
     instrument_list = db_multiple_prices.get_list_of_instruments()
+    failed = []
     for instrument_code in instrument_list:
         print(instrument_code)
-        process_adjusted_prices_single_instrument(
-            instrument_code,
-            csv_adj_data_path=csv_adj_data_path,
-            ADD_TO_DB=ADD_TO_DB,
-            ADD_TO_CSV=ADD_TO_CSV,
-        )
+        try:
+            process_adjusted_prices_single_instrument(
+                instrument_code,
+                csv_adj_data_path=csv_adj_data_path,
+                ADD_TO_DB=ADD_TO_DB,
+                ADD_TO_CSV=ADD_TO_CSV,
+            )
+        except Exception as exc:
+            print(f"  SKIP {instrument_code}: {exc}")
+            failed.append(instrument_code)
+    if failed:
+        print(f"\nFailed instruments: {failed}")
 
 
 def process_adjusted_prices_single_instrument(
