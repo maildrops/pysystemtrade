@@ -12,7 +12,8 @@ from syscore.constants import arg_not_supplied
 
 def get_instruments_with_prices() -> list:
     diag_prices = diagPrices()
-    return diag_prices.db_futures_contract_price_data.get_list_of_instrument_codes()
+    contracts = diag_prices.db_futures_contract_price_data.get_contracts_with_merged_price_data()
+    return sorted(set(c.instrument_code for c in contracts))
 
 
 def build_all_roll_calendars():
