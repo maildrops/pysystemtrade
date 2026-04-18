@@ -16,7 +16,7 @@ continues to be used for live daily price top-ups after migration.
 - Norgate Data subscription (professional futures tier)
 - Norgate Data Updater installed and synced on Windows
 - Windows machine on the same local network as the Pi (e.g. Parallels VM on the same Mac)
-- `cifs-utils` on the Pi (`sudo apt install -y cifs-utils`)
+- `samba` on the Pi (`sudo apt install -y samba`)
 
 **Time estimate:** 2–4 hours total (export ~30 min, import ~60–90 min, rebuild
 ~30–60 min)
@@ -25,8 +25,8 @@ continues to be used for live daily price top-ups after migration.
 
 ## Quick Checklist
 
-- [ ] [Phase 1](#phase-1-export-norgate-data-on-windows) — Export ~23,000 CSV files on Windows
-- [ ] [Phase 2](#phase-2-mount-the-export-on-the-pi) — Mount the Windows share on the Pi
+- [ ] [Phase 1](#phase-1-share-a-pi-directory-to-windows-via-samba) — Share a Pi directory to Windows via Samba
+- [ ] [Phase 2](#phase-2-export-norgate-data-on-windows) — Export ~23,000 CSV files on Windows
 - [ ] [Phase 3](#phase-3-clear-existing-price-data) — Clear IB Parquet data (keep MongoDB)
 - [ ] [Phase 4](#phase-4-import-norgate-prices-into-parquet) — Import Norgate CSVs into Parquet
 - [ ] [Phase 5](#phase-5-rebuild-roll-calendars) — Rebuild roll calendars from new prices
@@ -37,7 +37,63 @@ continues to be used for live daily price top-ups after migration.
 
 ---
 
-## Phase 1: Export Norgate Data on Windows
+## Phase 1: Share a Pi Directory to Windows via Samba
+
+The cleanest approach is to export a directory on the Pi via Samba and map it
+as a drive letter on Windows. The Norgate export then writes directly to the
+Pi's filesystem — no transfer step required.
+
+### 1a — Set up Samba on the Pi
+
+```bash
+sudo apt install -y samba
+mkdir -p ~/norgate_export
+```
+
+Add the following stanza to `/etc/samba/smb.conf` (append to the end of the
+file):
+
+```ini
+[norgate_export]
+path = /home/djb/norgate_export
+browseable = yes
+read only = no
+guest ok = no
+```
+
+Then set a Samba password for your Pi user and restart the service:
+
+```bash
+sudo smbpasswd -a djb
+sudo systemctl restart smbd
+```
+
+Find your Pi's IP address:
+
+```bash
+hostname -I
+# e.g. 192.168.0.x
+```
+
+### 1b — Map the Pi share on Windows
+
+Open PowerShell on the Windows machine and map the Pi share to a free drive
+letter (C: is taken; use any available letter, e.g. P:):
+
+```powershell
+net use P: \\192.168.0.x\norgate_export /user:djb YOUR_SAMBA_PASSWORD
+```
+
+Verify the mapping:
+
+```powershell
+dir P:\
+# Should show an empty directory initially
+```
+
+---
+
+## Phase 2: Export Norgate Data on Windows
 
 Run these steps on the **Windows machine** (Parallels VM or native).
 
@@ -52,10 +108,10 @@ Run these steps on the **Windows machine** (Parallels VM or native).
 2. Confirm Norgate Data Updater is running and fully synced (check the
    system tray icon — it should show a green tick with today's date).
 
-3. Run the export:
+3. Run the export, pointing the output at the mapped Pi drive:
 
    ```powershell
-   python norgate_utils/export.py --output-dir C:\norgate_export
+   python norgate_utils/export.py --output-dir P:\
    ```
 
    This writes approximately 23,000 CSV files named
@@ -66,43 +122,13 @@ Run these steps on the **Windows machine** (Parallels VM or native).
 
    Expect this to take 20–40 minutes for 105 instruments.
 
----
-
-## Phase 2: Mount the Export on the Pi
-
-### 2a — Share the folder from Windows
-
-1. Right-click `C:\norgate_export` → **Properties → Sharing → Share**
-2. Add your Windows user with Read permission
-3. Note the VM's IP address:
+4. When the export completes, the files are already on the Pi at
+   `~/norgate_export/norgate_export`. You can disconnect the Windows
+   drive mapping:
 
    ```powershell
-   ipconfig
-   # Look for the "Ethernet adapter" or "Wi-Fi" IPv4 address, e.g. 192.168.0.x
+   net use P: /delete
    ```
-
-### 2b — Mount on the Pi
-
-```bash
-sudo apt install -y cifs-utils
-mkdir -p ~/mnt/norgate
-
-sudo mount -t cifs //192.168.0.x/norgate_export ~/mnt/norgate \
-  -o username=YOUR_WINDOWS_USER,password=YOUR_WINDOWS_PASSWORD,uid=$(id -u),gid=$(id -g)
-```
-
-Replace `192.168.0.x` with the Windows VM IP and the credentials with your
-Windows login.
-
-### 2c — Verify the mount
-
-```bash
-ls ~/mnt/norgate | head -10
-# Should list CSV files like: CORN_20200300.csv, CRUDE_W_20200300.csv ...
-```
-
-If you see files, the mount is working. Keep this terminal open — unmounting
-early will interrupt the import.
 
 ---
 
@@ -134,7 +160,7 @@ Run from the Pi in the `pysystemtrade` virtualenv:
 cd ~/pysystemtrade
 python -c "
 from sysinit.futures.contract_prices_from_csv_to_db import init_db_with_csv_futures_contract_prices
-init_db_with_csv_futures_contract_prices('/home/djb/mnt/norgate')
+init_db_with_csv_futures_contract_prices('/home/djb/norgate_export/norgate_export')
 "
 ```
 
@@ -143,14 +169,12 @@ When prompted, press Enter to confirm. The importer reads each
 This replaces the 12-hour IB bulk download with a fast local file read —
 expect 60–90 minutes for 105 instruments.
 
+> **Note:** The path has two `norgate_export` components because `export.py`
+> creates a subdirectory inside the Samba share root. Adjust if your export
+> wrote directly to the share root (`~/norgate_export`).
+
 **Script:** `sysinit/futures/contract_prices_from_csv_to_db.py`
 **Key function:** `init_db_with_csv_futures_contract_prices(datapath)`
-
-After the import completes, unmount the share:
-
-```bash
-sudo umount ~/mnt/norgate
-```
 
 ---
 
